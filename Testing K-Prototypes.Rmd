@@ -1,0 +1,125 @@
+---
+title: "Testing K-Prototypes"
+author: "Juan Bernal"
+date: "21/06/2021"
+output: html_document
+---
+<h1>Testing K-Protoypes</h1>
+
+<h3>Libraries</h3>
+
+```{r}
+library(tidyverse)
+library(clustMixType) #Contains kproto() function for k-prototype clustering.
+library(factoextra)
+
+```
+
+<h3>Import previously processed data</h3>
+```{r}
+#This loads the file I had saved in the NY Airbnb EDA Draft 2.rmd file with the save() function
+load(file="airbnb_df.Rdata")
+```
+
+
+
+<h3>Convert the char variables to factors</h3>
+```{r}
+airbnb_df$neighbourhood_group<-factor(airbnb_df$neighbourhood_group)
+airbnb_df$neighbourhood<-factor(airbnb_df$neighbourhood)
+airbnb_df$room_type<-factor(airbnb_df$room_type)
+
+```
+
+<h3>Scale the data</h3>
+```{r}
+#Scaling the data First
+
+#With cat variables included.Note:Neighbourhood is dropped
+airbnb_df_scaled<-airbnb_df[,-2]
+airbnb_df_scaled[,-c(1,4)]<-scale(airbnb_df_scaled[,-c(1,4)])
+
+
+```
+
+<h3>Determine K</h3>
+
+Option 1:A custom function
+```{r}
+#Determine K 
+#This will use the elbow method to determine which k value reduces the within variability of the clusters the most. Seems like it's 7 or 8
+
+#This function will run kprot() k times and return the total WSS of the clusters.
+wss <- function(k) {
+  kproto(x=airbnb_df_scaled, k)$tot.withinss #The kproto object has the total Within Sum of Squares of the clusters. We want a K value that reduces this.
+}
+k.values <- 1:15
+
+wss_values <- map_dbl(k.values, wss)
+
+plot(k.values, wss_values,
+       type="b", pch = 19, frame = FALSE,
+       main="Reduction in WSS per K value",
+       xlab="Number of clusters K",
+       ylab="Total within-clusters sum of squares")
+```
+
+Option 2: A function from a library factoextra
+```{r}
+#Haven't gotten this working yet.
+#This function is from the factoextra library.
+# fviz_nbclust(x=airbnb_df_scaled, kproto, nstart=100, method = "wss")
+```
+
+
+<h3>Run the algorithm:kproto()</h3>
+
+```{r}
+#Using the k value determined above k=8
+airbnb_proto<-kproto(x=airbnb_df_scaled,k=8,iter.max=50)
+```
+
+<h3>Add the clusters to original data as labels and make some plots</h3>
+```{r}
+airbnb_df_clustered<-airbnb_df %>%
+  mutate("cluster"=airbnb_proto$cluster,.before=neighbourhood_group)
+```
+
+```{r}
+neighbourhoodGroupByCluster<-ggplot(data=airbnb_df_clustered,aes(x=neighbourhood_group))+
+         geom_bar()+
+         labs(title="Neighbourhood Groups distribution in each cluster",x="neighbourhood_group",y="Number of listings")+
+         coord_flip()+
+         facet_wrap(~cluster,nrow=3)
+
+neighbourhoodGroupByCluster
+```
+
+
+```{r}
+priceByCluster<-ggplot(data=airbnb_df_clustered,aes(x=price))+
+         geom_histogram()+
+         labs(title="Price distribution in each cluster",x="price",y="Number of listings")+
+         facet_wrap(~cluster,nrow=3)
+
+priceByCluster
+```
+
+```{r}
+room_typeByCluster<-ggplot(data=airbnb_df_clustered,aes(x=room_type))+
+         geom_bar()+
+         labs(title="Room type distribution in each cluster",x="room_type",y="Number of listings")+
+         facet_wrap(~cluster,nrow=3)
+room_typeByCluster
+```
+<h3>Plot clusters in a map</h3>
+```{r}
+#WIP
+aribnb_proto_visualize<-clprofiles(object=airbnb_proto,x=airbnb_df_scaled)
+```
+
+```{r}
+#WIP
+factoextra::fviz_cluster(airbnb_proto,data=airbnb_df_scaled)
+```
+

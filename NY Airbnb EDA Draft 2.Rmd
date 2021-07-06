@@ -1,0 +1,292 @@
+---
+title: "NY Airbnb Draft 2"
+author: "Juan Bernal"
+date: "19/06/2021"
+output: html_document
+---
+
+<h1>Libraries</h1>
+```{r,echo=FALSE}
+library(corrplot)
+library(tidyverse)
+library(Hmisc) #This function lets me plot a matrix of histograms from a dataframe
+library(ggpubr) #Let's me arrange plots side by side with ggarrange()
+```
+<h1>Importing as Tibble</h1>
+```{r}
+#Importing the Airbnb data
+
+#read.csv() method which is older,slower,and converts some character variables to factors.
+#airbnb<-read.csv("./AB_NYC_2019.csv",sep=",",header=TRUE,na.strings=c(""," ","NA"))
+
+#read_csv() method which is a newer,faster,method that outputs a tibble and does not convert the data unecessarily.
+airbnb<-read_csv("./AB_NYC_2019.csv",col_names=TRUE,na=c(""," ","NA"))
+```
+
+<h1>Remove the 4 unique identifiers</h1>
+
+```{r}
+#I remove id,name,host_id,and host_name as these are all unique identifier strings and are unlikely to have any useful impact on our clustering algorithms
+airbnb_df<-airbnb[,-(1:4)]
+```
+
+```{r}
+airbnb_df
+```
+
+<h1>Missing Values</h1>
+
+
+<h5>Percentage of NA's per Column</h5>
+
+```{r}
+#Only 4 variables have NA's. Of those four, two of them were part of the group of columns we dropped. The other two are the review related columns which have up to 1/5th missing values.
+
+##It's really just last_review and reviews_per_month contributing all NA's. The rest of the data doesn't have any. The nice thing is that at least reviews_per_month is a numerical value so we can maybe impute with an average.
+
+#This function calculates the percentage of NA values for the column passed into it.
+pctOfNA<-function(col){
+    pctNA<-sum(is.na(col))/length(col)
+    pctNA<-as.numeric(round(pctNA*100,digits=2))
+    return(pctNA)
+}
+naDistrPerCol<-sort(sapply(airbnb_df,pctOfNA),decreasing=TRUE)
+naDistrPerCol
+```
+
+```{r}
+#Let's have a look at the rows with the NA's. Might these be input errors? Or should they actually be 0's? Or maybe it really is just missing data.
+airbnb_df_lastreview_nas<-airbnb_df[!complete.cases(airbnb_df$last_review),]
+nrow(airbnb_df_lastreview_nas) #10052 NA's
+
+airbnb_df_reviewspermonth_nas<-airbnb_df[!complete.cases(airbnb_df$reviews_per_month),]
+nrow(airbnb_df_reviewspermonth_nas) #10052
+
+#It apepears as though all the rows with NA's have both reviews_per_month and last_review as NA. They're matching NA's. It's very likley that these NA's should be 0's because they all seem to appear when the number_of_reviews is 0 thus making the last_review date not applicable and the reviews_per_month 0.
+
+#Let's double check that this is in fact the case and that these NA's *ONLY* appear when number_of_reviews=0.
+#The table() function shows us the distribution of number_of_reviews values within these two dataframes. They all have the number_of_reviews set to 0.
+table(airbnb_df_reviewspermonth_nas$number_of_reviews)
+table(airbnb_df_reviewspermonth_nas$number_of_reviews)
+```
+
+<h5>Imputing NA's as 0 for reviews_per_month and dropping last_review</h5>
+```{r}
+#Given all of the above it is safe to impute the reviews_per_month variable with 0's. However, what do we do with the last_review values?
+
+airbnb_df$reviews_per_month[is.na(airbnb_df$reviews_per_month)]<-0
+
+#I'm just going to drop that last_review column for now.
+airbnb_df<-airbnb_df[,-9]
+```
+<h5>Latest dataset with no NA's</h5>
+```{r}
+#No NA's, we now have 11 columns.
+sort(sapply(airbnb_df,pctOfNA),decreasing=TRUE)
+```
+
+<h1>Outliers</h1>
+
+<h5>Devising a function that will remove outiers based on the IQR outlier criterion.</h5>
+```{r}
+#These functions will help programmatically remove outliers using the interquartile range criterion.
+outlierUpperThreshold<-function(col){
+  threshold<-as.numeric(quantile(col,0.75)+(1.5*IQR(col)))
+  return(threshold)
+}
+outlierLowerThreshold<-function(col){
+  threshold<-as.numeric(quantile(col,0.25)-(1.5*IQR(col)))
+  return(threshold)
+}
+
+removeOutliers<-function(col){
+  lower<-outlierLowerThreshold(col)
+  upper<-outlierUpperThreshold(col)
+  return(col[upper>=col & col>=lower])
+}
+
+returnOutliers<-function(col){
+  lower<-outlierLowerThreshold(col)
+  upper<-outlierUpperThreshold(col)
+  return(col[upper<col | col<lower])
+}
+```
+
+```{r}
+summary(airbnb_df)
+
+#These columns have a very high max value that could be a sign of input errors: price,minimum_nights,number_of_reviews.calculated_host_listings_count. Let's review these first one by one
+
+```
+
+<h5>Focusing in on Price distribution and outliers</h5>
+```{r}
+#Checking the distribution of the listing prices with a histogram.The majority of listings are $150 per night or less
+priceDistr<-ggplot(data=airbnb_df)+
+    geom_histogram(mapping=aes(x=price),binwidth=10)+
+    scale_x_continuous(name="Listing Price",limits=c(0,1000),breaks=seq(0,1000,100))+
+    geom_vline(xintercept=quantile(airbnb_df$price,0.25),linetype="dotted",colour="darkslategray",size=1.5) +
+    geom_vline(xintercept=quantile(airbnb_df$price,0.75),linetype="dotted",colour="darkslategray",size=1.5)
+
+#We can verify this further from the summary function. The median price is $106. The mean is $152. 75% of listings have a price at or below $175.
+#The interquartile range is $69-175 and this is marked with the dotted lines in the plot below
+summary(airbnb_df$price)
+priceDistr
+
+```
+```{r}
+#Filtering out the outliers of the price column leaves us with 45,923 rows.
+priceOutliers<-as.vector(returnOutliers(airbnb_df$price))
+airbnb_df<-airbnb_df %>%
+  filter(!(price %in% priceOutliers))
+```
+
+```{r}
+summary(airbnb_df$price)
+priceDistr<-ggplot(data=airbnb_df)+
+    geom_histogram(mapping=aes(x=price),binwidth=10)+
+    scale_x_continuous(name="Listing Price",limits=c(0,1000),breaks=seq(0,1000,100))+
+    geom_vline(xintercept=quantile(airbnb_df$price,0.25),linetype="dotted",colour="darkslategray",size=1.5) +
+    geom_vline(xintercept=quantile(airbnb_df$price,0.75),linetype="dotted",colour="darkslategray",size=1.5)
+
+priceDistr
+
+```
+
+<h5>Focusing in on minimum_nights distribution and outliers</h5>
+```{r}
+#Before removing outliers
+minNightsDistr<-ggplot(data=airbnb_df)+
+    geom_histogram(mapping=aes(x=minimum_nights),bins=85)+
+    scale_x_continuous(name="Minimum Night Stay",limits=c(0,50),breaks=seq(0,50,5))+
+    scale_y_continuous(name="Count",limits=c(0,15000),breaks=seq(0,15000,1000))+
+    geom_vline(xintercept=quantile(airbnb_df$minimum_nights,0.25),linetype="dotted",colour="darkslategray",size=1.5) +
+    geom_vline(xintercept=quantile(airbnb_df$minimum_nights,0.75),linetype="dotted",colour="darkslategray",size=1.5)
+
+
+
+minNightsDistr
+```
+```{r}
+minimum_nightsOutliers<-as.vector(returnOutliers(airbnb_df$minimum_nights)) #6185 outliers. This will reduce the 45,923 rows to 39,738
+
+
+```
+
+
+```{r}
+airbnb_df<-airbnb_df %>%
+  filter(!(minimum_nights %in% minimum_nightsOutliers))
+```
+
+```{r}
+#After removing outliers
+minNightsDistr<-ggplot(data=airbnb_df)+
+    geom_histogram(mapping=aes(x=minimum_nights),bins=15)+
+    scale_x_continuous(name="Minimum Night Stay",limits=c(0,15),breaks=seq(0,11,1))+
+    scale_y_continuous(name="Count",limits=c(0,15000),breaks=seq(0,15000,1000))+
+    geom_vline(xintercept=quantile(airbnb_df$minimum_nights,0.25),linetype="dotted",colour="darkslategray",size=1.5) +
+    geom_vline(xintercept=quantile(airbnb_df$minimum_nights,0.75),linetype="dotted",colour="darkslategray",size=1.5)
+minNightsDistr
+```
+
+<h5>Focusing in on calculated_host_listings_count and outliers</h5>
+
+```{r}
+hostListingsCount<-ggplot(data=airbnb_df)+
+    geom_histogram(mapping=aes(x=calculated_host_listings_count))
+
+#This table breakdown shows there really is only one value that is an outlier and it appears 144 times in the data. Everything else seems reasonable
+table(airbnb_df$calculated_host_listings_count)
+
+#A look at the original data shows that all of these listings with an abnormally high calculated_host_listings_count come from a host under the name of "Sonder (NYC)". This is probably a large company who manages hundreds of listings in NYC. It seems valuable to me to keep the data from these kinds of hosts because they reflect the fact that in NY the market is not simple made up of individuals.
+
+#This code takes all the listings in the ORIGINAL dataset(before we removed the host_name) where the calculated_host_listing_count is the max (327) and returns the unique host_name values.There is only one.
+unique(
+  airbnb %>%
+    filter(calculated_host_listings_count==max(calculated_host_listings_count)) %>%
+    select(host_name)
+  )
+
+#For now, I've decided to keep the outliers for this column
+
+```
+<h5>Focusing in on number_of_reviews and outliers</h5>
+
+```{r}
+#Not sure what to do with this one. High number of reviews seem important to keep
+minNumReviews<-ggplot(data=airbnb_df)+
+  geom_histogram(mapping=aes(x=number_of_reviews),bins=15)+
+  geom_vline(xintercept=quantile(airbnb_df$number_of_reviews,0.25),linetype="dotted",colour="darkslategray",size=1.5)+
+ geom_vline(xintercept=quantile(airbnb_df$number_of_reviews,0.75),linetype="dotted",colour="darkslategray",size=1.5)
+
+ 
+ 
+airbnb_df %>%
+  slice_max(n=100,order_by=number_of_reviews)
+
+
+```
+
+<h5>Focusing in on reviews_per_month and outliers</h5>
+
+```{r}
+#Seems like this value is based on the number of reviews received per month for some undisclosed period of time. It is likely based on how long the listing has been on Airbnb.This means a listing with more reviews that has been around longer will have a lower reviews_per_month then one with less reviews that has been around less time.
+airbnb_df %>%
+  slice_max(n=10,order_by=reviews_per_month)
+  
+minReviewsPerMonth<-ggplot(data=airbnb_df)+
+  geom_histogram(mapping=aes(x=reviews_per_month))
+minReviewsPerMonth
+
+#Leaving it as is for now, Im not sure
+```
+
+
+```{r}
+#Removing the number_of_reviews outliers reduces the dataset down to 35,202 records
+
+number_of_reviewsOutliers<-returnOutliers(airbnb_df$number_of_reviews) #4,536 outliers
+
+airbnb_df<-airbnb_df %>%
+  filter(!(number_of_reviews %in% number_of_reviewsOutliers)) 
+```
+
+<h1>Correlation</h1>
+```{r}
+#Even after removing columns and removing some outliers there is still very little correlation betweenn most variables.
+corr_matrix<-corrplot.mixed(cor(airbnb_df[,-c(1:2,5)]),lower="number",upper="square")
+
+```
+
+<h1>Convert the char variables to factors</h1>
+```{r}
+airbnb_df$neighbourhood_group<-factor(airbnb_df$neighbourhood_group)
+airbnb_df$neighbourhood<-factor(airbnb_df$neighbourhood)
+airbnb_df$room_type<-factor(airbnb_df$room_type)
+
+```
+
+<h1>One-hot encode the categorical variables<h3>
+```{r}
+dmy<-dummyVars("~.",data=airbnb_df[,c(1,5)],fullRank=T)
+dat_transformed<-data.frame(predict(dmy,newdata=airbnb_df[,c(1,5)]))
+
+#Saving the encoded data set into a new variable separate from airbnb_df
+airbnb_df_encoded<-airbnb_df %>%
+  select(-c(neighbourhood,neighbourhood_group,room_type)) %>%
+  mutate(dat_transformed,.before=latitude)
+```
+
+<h1>Saving the data for use in other files</h1>
+```{r}
+save(airbnb_df,file="airbnb_df.Rdata")
+save(airbnb_df_encoded,file="airbnb_df_encoded.Rdata")
+```
+
+```{r}
+summary(airbnb_df)
+```
+
+
+

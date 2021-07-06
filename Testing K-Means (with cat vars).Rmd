@@ -1,0 +1,99 @@
+---
+title: "Testing Clustering"
+author: "Juan Bernal"
+date: "21/06/2021"
+output: html_document
+---
+<h1>Trying some preliminary k-means clustering - with one-hot encoding</h1>
+
+<h3>Libraries</h3>
+```{r}
+library(tidyverse)
+library(factoextraS)
+```
+
+<h3>Load dataframe from other file</h3>
+```{r}
+#This loads the file I had saved in the NY Airbnb EDA Draft 2.rmd file with the save() function
+load(file="airbnb_df_encoded.Rdata")
+load(file="airbnb_df.Rdata")
+
+```
+
+<h3>Scale the data</h3>
+```{r}
+airbnb_df_scaled<-airbnb_df_encoded
+airbnb_df_scaled[,c(7:14)]<-scale(airbnb_df_scaled[,c(7:14)])
+```
+
+<h3>Determine K</h3>
+```{r}
+#This will use the elbow method to determine which k value reduces the within variability of the clusters the most. Seems like it's 4.
+wss <- function(k) {
+  kmeans(airbnb_df_scaled, k, nstart = 10 )$tot.withinss
+}
+k.values <- 1:15
+
+wss_values <- map_dbl(k.values, wss)
+
+plot(k.values, wss_values,
+       type="b", pch = 19, frame = FALSE,
+       main="Reduction in WSS per K value",
+       xlab="Number of clusters K",
+       ylab="Total within-clusters sum of squares")
+
+```
+
+<h3>K-Means Clustering on just the numerical values, no hot encoding</h3>
+```{r}
+set.seed(123)
+kmeans_basic<-kmeans(airbnb_df_scaled,centers=6)
+```
+
+
+<h3>Attach the cluster as labels on the original dataset</h3>
+```{r}
+airbnb_df_clustered<-airbnb_df %>%
+  mutate("cluster"=kmeans_basic$cluster,.before=neighbourhood_group)
+```
+
+<h3>Plot data faceted by cluster</h3>
+```{r}
+
+#summary(airbnb_df_clustered[airbnb_df_clustered$cluster==2,])
+cluster1<-airbnb_df_clustered[airbnb_df_clustered$cluster==1,] #Cluster 1 - 
+cluster2<-airbnb_df_clustered[airbnb_df_clustered$cluster==2,] #Cluster 2 - 
+cluster3<-airbnb_df_clustered[airbnb_df_clustered$cluster==3,] #Cluster 3 - 
+cluster4<-airbnb_df_clustered[airbnb_df_clustered$cluster==4,] #Cluster 4 - 
+cluster5<-airbnb_df_clustered[airbnb_df_clustered$cluster==5,] #Cluster 5 - 
+
+neighbourhoodGroupByCluster<-ggplot(data=airbnb_df_clustered,aes(x=neighbourhood_group))+
+         geom_bar()+
+         labs(title="Neighbourhood Groups distribution in each cluster",x="neighbourhood_group",y="Number of listings")+
+         coord_flip()+
+         facet_wrap(~cluster,nrow=3)
+
+neighbourhoodGroupByCluster
+```
+
+
+```{r}
+priceByCluster<-ggplot(data=airbnb_df_clustered,aes(x=price))+
+         geom_histogram()+
+         labs(title="Price distribution in each cluster",x="price",y="Number of listings")+
+         facet_wrap(~cluster,nrow=3)
+
+priceByCluster
+```
+
+```{r}
+room_typeByCluster<-ggplot(data=airbnb_df_clustered,aes(x=room_type))+
+         geom_bar()+
+         labs(title="Room type distribution in each cluster",x="room_type",y="Number of listings")+
+         facet_wrap(~cluster,nrow=3)
+room_typeByCluster
+```
+```{r}
+fviz_cluster(kmeans_basic, data = airbnb_df_encoded, geom = c("point"),ellipse.type = "euclid")
+```
+
