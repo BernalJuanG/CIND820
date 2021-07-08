@@ -11,22 +11,20 @@ library(corrplot)
 library(tidyverse)
 library(Hmisc) #This function lets me plot a matrix of histograms from a dataframe
 library(ggpubr) #Let's me arrange plots side by side with ggarrange()
+library(caret) #For the one-hot encoding function
 ```
 <h1>Importing as Tibble</h1>
 ```{r}
 #Importing the Airbnb data
 
-#read.csv() method which is older,slower,and converts some character variables to factors.
-#airbnb<-read.csv("./AB_NYC_2019.csv",sep=",",header=TRUE,na.strings=c(""," ","NA"))
-
-#read_csv() method which is a newer,faster,method that outputs a tibble and does not convert the data unecessarily.
+#read_csv() method which is a newer,faster,method that outputs a tibble and does not convert the data unnecessarily.
 airbnb<-read_csv("./AB_NYC_2019.csv",col_names=TRUE,na=c(""," ","NA"))
 ```
 
 <h1>Remove the 4 unique identifiers</h1>
 
 ```{r}
-#I remove id,name,host_id,and host_name as these are all unique identifier strings and are unlikely to have any useful impact on our clustering algorithms
+#I remove id,name,host_id,and host_name as these are all unique identifier strings and are unlikely to have any useful impact on our clustering algorithms.
 airbnb_df<-airbnb[,-(1:4)]
 ```
 
@@ -42,29 +40,32 @@ airbnb_df
 ```{r}
 #Only 4 variables have NA's. Of those four, two of them were part of the group of columns we dropped. The other two are the review related columns which have up to 1/5th missing values.
 
-##It's really just last_review and reviews_per_month contributing all NA's. The rest of the data doesn't have any. The nice thing is that at least reviews_per_month is a numerical value so we can maybe impute with an average.
-
 #This function calculates the percentage of NA values for the column passed into it.
 pctOfNA<-function(col){
     pctNA<-sum(is.na(col))/length(col)
     pctNA<-as.numeric(round(pctNA*100,digits=2))
     return(pctNA)
 }
+
+#Apply the function to every column of the dataset.
 naDistrPerCol<-sort(sapply(airbnb_df,pctOfNA),decreasing=TRUE)
 naDistrPerCol
 ```
 
 ```{r}
-#Let's have a look at the rows with the NA's. Might these be input errors? Or should they actually be 0's? Or maybe it really is just missing data.
+#Checking the total number of rows with NA's in the last_review variable
 airbnb_df_lastreview_nas<-airbnb_df[!complete.cases(airbnb_df$last_review),]
 nrow(airbnb_df_lastreview_nas) #10052 NA's
 
+
+#Checking the total number of rows with NA's in the reviews per month variable
 airbnb_df_reviewspermonth_nas<-airbnb_df[!complete.cases(airbnb_df$reviews_per_month),]
 nrow(airbnb_df_reviewspermonth_nas) #10052
 
-#It apepears as though all the rows with NA's have both reviews_per_month and last_review as NA. They're matching NA's. It's very likley that these NA's should be 0's because they all seem to appear when the number_of_reviews is 0 thus making the last_review date not applicable and the reviews_per_month 0.
+#It appears as though all the rows with NA's have both reviews_per_month and last_review as NA. They're matching NA's. It's very likely that these NA's should be 0's because they all seem to appear when the number_of_reviews is 0 thus making the last_review date not applicable and the reviews_per_month 0.
 
 #Let's double check that this is in fact the case and that these NA's *ONLY* appear when number_of_reviews=0.
+
 #The table() function shows us the distribution of number_of_reviews values within these two dataframes. They all have the number_of_reviews set to 0.
 table(airbnb_df_reviewspermonth_nas$number_of_reviews)
 table(airbnb_df_reviewspermonth_nas$number_of_reviews)
@@ -72,11 +73,11 @@ table(airbnb_df_reviewspermonth_nas$number_of_reviews)
 
 <h5>Imputing NA's as 0 for reviews_per_month and dropping last_review</h5>
 ```{r}
-#Given all of the above it is safe to impute the reviews_per_month variable with 0's. However, what do we do with the last_review values?
+#Given all of the above, it is safe to impute the reviews_per_month variable with 0's. However, what do we do with the last_review values?
 
 airbnb_df$reviews_per_month[is.na(airbnb_df$reviews_per_month)]<-0
 
-#I'm just going to drop that last_review column for now.
+#last_review will be dropped
 airbnb_df<-airbnb_df[,-9]
 ```
 <h5>Latest dataset with no NA's</h5>
@@ -90,21 +91,27 @@ sort(sapply(airbnb_df,pctOfNA),decreasing=TRUE)
 <h5>Devising a function that will remove outiers based on the IQR outlier criterion.</h5>
 ```{r}
 #These functions will help programmatically remove outliers using the interquartile range criterion.
+
+#Calculates the upper threshold that helps identify high outliers.
 outlierUpperThreshold<-function(col){
   threshold<-as.numeric(quantile(col,0.75)+(1.5*IQR(col)))
   return(threshold)
 }
+
+#Calculates the upper threshold that helps identify low outliers.
 outlierLowerThreshold<-function(col){
   threshold<-as.numeric(quantile(col,0.25)-(1.5*IQR(col)))
   return(threshold)
 }
 
+#Removes outliers from the column passed into it.
 removeOutliers<-function(col){
   lower<-outlierLowerThreshold(col)
   upper<-outlierUpperThreshold(col)
   return(col[upper>=col & col>=lower])
 }
 
+#Returns the outliers from the column passed into it. Doesn't remove them.
 returnOutliers<-function(col){
   lower<-outlierLowerThreshold(col)
   upper<-outlierUpperThreshold(col)
@@ -168,6 +175,7 @@ minNightsDistr<-ggplot(data=airbnb_df)+
 minNightsDistr
 ```
 ```{r}
+#Store the reference to the outliers here
 minimum_nightsOutliers<-as.vector(returnOutliers(airbnb_df$minimum_nights)) #6185 outliers. This will reduce the 45,923 rows to 39,738
 
 
@@ -175,6 +183,7 @@ minimum_nightsOutliers<-as.vector(returnOutliers(airbnb_df$minimum_nights)) #618
 
 
 ```{r}
+#Compare the dataset to the outlier object above to filter them out. Any values that are equal to a value in minimum_nightsOutiers is removed.
 airbnb_df<-airbnb_df %>%
   filter(!(minimum_nights %in% minimum_nightsOutliers))
 ```
@@ -199,9 +208,9 @@ hostListingsCount<-ggplot(data=airbnb_df)+
 #This table breakdown shows there really is only one value that is an outlier and it appears 144 times in the data. Everything else seems reasonable
 table(airbnb_df$calculated_host_listings_count)
 
-#A look at the original data shows that all of these listings with an abnormally high calculated_host_listings_count come from a host under the name of "Sonder (NYC)". This is probably a large company who manages hundreds of listings in NYC. It seems valuable to me to keep the data from these kinds of hosts because they reflect the fact that in NY the market is not simple made up of individuals.
+#A look at the original data shows that all of these listings with an abnormally high calculated_host_listings_count come from a host under the name of "Sonder (NYC)". This is probably a large company who manages hundreds of listings in NYC. It seems valuable to me to keep the data from these kinds of hosts because they reflect the fact that in NY the market is not simply made up of individuals.
 
-#This code takes all the listings in the ORIGINAL dataset(before we removed the host_name) where the calculated_host_listing_count is the max (327) and returns the unique host_name values.There is only one.
+#This code takes all the listings in the ORIGINAL dataset(before we removed the host_name) where the calculated_host_listing_count is the max (327) and returns the unique host_name values.This confirms that all of these outliers are in listings by the same host.
 unique(
   airbnb %>%
     filter(calculated_host_listings_count==max(calculated_host_listings_count)) %>%
@@ -239,7 +248,7 @@ minReviewsPerMonth<-ggplot(data=airbnb_df)+
   geom_histogram(mapping=aes(x=reviews_per_month))
 minReviewsPerMonth
 
-#Leaving it as is for now, Im not sure
+#Leaving it as is for now
 ```
 
 
@@ -269,7 +278,7 @@ airbnb_df$room_type<-factor(airbnb_df$room_type)
 
 <h1>One-hot encode the categorical variables<h3>
 ```{r}
-dmy<-dummyVars("~.",data=airbnb_df[,c(1,5)],fullRank=T)
+dmy<-caret::dummyVars("~.",data=airbnb_df[,c(1,5)],fullRank=T)
 dat_transformed<-data.frame(predict(dmy,newdata=airbnb_df[,c(1,5)]))
 
 #Saving the encoded data set into a new variable separate from airbnb_df
@@ -284,9 +293,7 @@ save(airbnb_df,file="airbnb_df.Rdata")
 save(airbnb_df_encoded,file="airbnb_df_encoded.Rdata")
 ```
 
-```{r}
-summary(airbnb_df)
-```
+
 
 
 
