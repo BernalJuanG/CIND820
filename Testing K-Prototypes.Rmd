@@ -12,6 +12,7 @@ output: html_document
 library(tidyverse)
 library(clustMixType) #Contains kproto() function for k-prototype clustering.
 library(factoextra)
+library(clValid)
 
 ```
 
@@ -33,9 +34,9 @@ airbnb_df$room_type<-factor(airbnb_df$room_type)
 
 <h3>Scale the data</h3>
 ```{r}
-#Scaling the data First
+#Scaling the data first
 
-#With cat variables included.Note:Neighbourhood is dropped
+#Note:Neighbourhood is dropped
 airbnb_df_scaled<-airbnb_df[,-2]
 airbnb_df_scaled[,-c(1,4)]<-scale(airbnb_df_scaled[,-c(1,4)])
 
@@ -44,31 +45,24 @@ airbnb_df_scaled[,-c(1,4)]<-scale(airbnb_df_scaled[,-c(1,4)])
 
 <h3>Determine K</h3>
 
-Option 1:A custom function
+A custom function
 ```{r}
 #Determine K 
 #This will use the elbow method to determine which k value reduces the within variability of the clusters the most. Seems like it's 7 or 8
 
-#This function will run kprot() k times and return the total WSS of the clusters.
+#This function will run kproto() k times and return the total WSS of the clusters.
 wss <- function(k) {
-  kproto(x=airbnb_df_scaled, k)$tot.withinss #The kproto object has the total Within Sum of Squares of the clusters. We want a K value that reduces this.
+  clustMixType::kproto(x=airbnb_df_scaled, k)$tot.withinss #The kproto object has the total Within Sum of Squares of the clusters. We want a K value that reduces this.
 }
-k.values <- 1:15
+kvalues <- 1:15
 
-wss_values <- map_dbl(k.values, wss)
+wss_values <- map_dbl(kvalues, wss) #Applies the wss function to each element in k.values
 
-plot(k.values, wss_values,
+plot(kvalues, wss_values,
        type="b", pch = 19, frame = FALSE,
        main="Reduction in WSS per K value",
        xlab="Number of clusters K",
        ylab="Total within-clusters sum of squares")
-```
-
-Option 2: A function from a library factoextra
-```{r}
-#Haven't gotten this working yet.
-#This function is from the factoextra library.
-# fviz_nbclust(x=airbnb_df_scaled, kproto, nstart=100, method = "wss")
 ```
 
 
@@ -76,7 +70,9 @@ Option 2: A function from a library factoextra
 
 ```{r}
 #Using the k value determined above k=8
+set.seed(1234)
 airbnb_proto<-kproto(x=airbnb_df_scaled,k=8,iter.max=50)
+#A methodologically based iter.max value has not yet been chosen.Will require more research but in the meanwhile I just use 50.
 ```
 
 <h3>Add the clusters to original data as labels and make some plots</h3>
@@ -86,6 +82,7 @@ airbnb_df_clustered<-airbnb_df %>%
 ```
 
 ```{r}
+#Plot the clusters in a bar graph faceted by different variables of interest.
 neighbourhoodGroupByCluster<-ggplot(data=airbnb_df_clustered,aes(x=neighbourhood_group))+
          geom_bar()+
          labs(title="Neighbourhood Groups distribution in each cluster",x="neighbourhood_group",y="Number of listings")+
@@ -114,12 +111,30 @@ room_typeByCluster
 ```
 <h3>Plot clusters in a map</h3>
 ```{r}
-#WIP
-aribnb_proto_visualize<-clprofiles(object=airbnb_proto,x=airbnb_df_scaled)
+#WIP - Still have not been able to get this section working
+aribnb_proto_visualize<-clustMixType::clprofiles(object=airbnb_proto,x=airbnb_df)
 ```
 
 ```{r}
-#WIP
+#WIP - Still have not been able to get this section working
 factoextra::fviz_cluster(airbnb_proto,data=airbnb_df_scaled)
 ```
 
+<h3>Evaluating the clusters with Dunn metric</h3>
+
+```{r}
+#On my machine the dunn() and connectivity() algorithms could not run without allocating more memory with the memory.limit() function.
+memory.size() ### Checking your memory size
+memory.limit(size=56000) ## Checking the set limit 
+```
+
+```{r}
+#Commenting this function out as it takes a very long time to run so I only did it once.
+clValid::dunn(Data=airbnb_df_clustered,clusters=airbnb_proto$cluster) #0.001901993
+```
+<h3>Evaluating the clusters with Connectivity metric</h3>
+
+```{r}
+#Commenting this function out as it takes a very long time to run so I only did it once.
+#clValid::connectivity(Data=airbnb_df_clustered,clusters=airbnb_proto$cluster) #28376.36
+```
