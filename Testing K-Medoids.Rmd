@@ -1,0 +1,137 @@
+---
+title: "K-Medoids"
+author: "Juan Bernal"
+date: "18/07/2021"
+output: html_document
+---
+<h1>Running K-Medoids with one-hot encoded categorical variables</h1>
+
+<h3>Libraries</h3>
+```{r}
+library(tidyverse)
+library(factoextra)
+library(cluster)
+library(clValid)
+```
+
+<h3>Load dataframe from other file</h3>
+```{r}
+#This loads the files I had saved in the NY Airbnb EDA Draft 2.rmd file with the save() function
+load(file="airbnb_df_encoded.Rdata") 
+load(file="airbnb_df.Rdata")
+
+```
+
+<h3>Scale the data</h3>
+```{r}
+#Scaling only the numerical variables. The one-hot encoded variables don't need to be scaled.
+airbnb_df_scaled<-airbnb_df_encoded
+airbnb_df_scaled[,c(7:14)]<-scale(airbnb_df_scaled[,c(7:14)])
+
+#No categorical variables. For comparison when I evaluate the results.
+airbnb_df_scaled_no_cat<-airbnb_df_scaled[,-c(1:6)]
+
+
+```
+
+<h3>Determine K</h3>
+```{r}
+#This will use the elbow method to determine which k value reduces the within variability of the clusters the most. The outcome is about 6.
+
+
+#This function will run clara() k times and return the average silhouette width of the clusters
+sil_avg_width <- function(k) {
+  cluster::clara(airbnb_df_scaled_no_cat, k)$silinfo$avg.width #The clara() object has the silinfo list which contains a avg.width value. We want a K value that maximizes this.
+}
+
+k.values <- 2:20
+
+sil_values <- map_dbl(k.values, sil_avg_width)#Applies the sil_avg_width function to each element in k.values
+
+
+plot(k.values, sil_values,
+       type="b", pch = 19, frame = FALSE,
+       main="Average silhouette score per Value of K",
+       xlab="Number of clusters K",
+       ylab="Average silhouette score")
+
+```
+
+```{r}
+#The clara() function from the cluster package is much better suited for applying k-medoids to big data sets.pam() takes extremely long.
+set.seed(123)
+airbnb_kmedoids<-cluster::clara(airbnb_df_scaled_no_cat,15)
+```
+
+```{r}
+airbnb_kmedoids
+
+```
+
+<h3>Attach the cluster as labels on the original dataset</h3>
+```{r}
+airbnb_df_clustered<-airbnb_df %>%
+  mutate("cluster"=airbnb_kmedoids$clustering,.before=neighbourhood_group)
+```
+
+<h3>Visualize the clusters in a 2D Plot</h3>
+```{r}
+fviz_cluster(airbnb_kmedoids, data = airbnb_df_scaled_no_cat, geom = c("point"),ellipse.type = "euclid")
+```
+
+
+
+<h3>Plot data faceted by cluster</h3>
+```{r}
+
+
+neighbourhoodGroupByCluster<-ggplot(data=airbnb_df_clustered,aes(x=neighbourhood_group))+
+         geom_bar()+
+         labs(title="Neighbourhood Groups distribution in each cluster",x="neighbourhood_group",y="Number of listings")+
+         coord_flip()+
+         facet_wrap(~cluster,nrow=5)
+
+neighbourhoodGroupByCluster
+```
+
+
+```{r}
+priceByCluster<-ggplot(data=airbnb_df_clustered,aes(x=price))+
+         geom_histogram()+
+         labs(title="Price distribution in each cluster",x="price",y="Number of listings")+
+         facet_wrap(~cluster,nrow=5)
+
+priceByCluster
+```
+
+```{r}
+room_typeByCluster<-ggplot(data=airbnb_df_clustered,aes(x=room_type))+
+         geom_bar()+
+         labs(title="Room type distribution in each cluster",x="room_type",y="Number of listings")+
+         facet_wrap(~cluster,nrow=6)
+room_typeByCluster
+```
+
+<h3>Evaluating the clusters with Dunn metric</h3>
+
+```{r}
+#On my machine the dunn() and connectivity() algorithms could not run without allocating more memory with the memory.limit() function.
+memory.size() ### Checking your memory size
+memory.limit(size=56000) ## Checking the set limit 
+```
+
+```{r}
+#Commenting this out because it takes a very long time to run. I ran it just once.
+#clValid::dunn(Data=airbnb_df_clustered,clusters=airbnb_kmedoids$clustering) #0.002071083
+```
+<h3>Evaluating the clusters with Connectivity metric</h3>
+
+```{r}
+#Commenting this out because it takes a very long time to run. I ran it just once.
+#clValid::connectivity(Data=airbnb_df_clustered,clusters=airbnb_kmedoids$clustering) 
+#19549.68
+```
+
+
+
+
