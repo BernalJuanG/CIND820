@@ -265,6 +265,7 @@ airbnb_df<-airbnb_df %>%
 ```{r}
 #Even after removing columns and removing some outliers there is still very little correlation betweenn most variables.
 corr_matrix<-corrplot.mixed(cor(airbnb_df[,-c(1:2,5)]),lower="number",upper="square")
+corr_matrix<-corrplot(cor(airbnb_df[,-c(1:2,5)]),method="color")
 
 ```
 
